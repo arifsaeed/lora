@@ -8,7 +8,7 @@ accelerate launch train_lora_dreambooth.py \
   --instance_data_dir=$INSTANCE_DIR \
   --output_dir=$OUTPUT_DIR \
   --instance_prompt="style of sks" \
-  --resolution=512 \
+  --resolution=768 \
   --train_batch_size=1 \
   --gradient_accumulation_steps=1 \
   --learning_rate=1e-4 \

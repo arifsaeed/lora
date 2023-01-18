@@ -1,0 +1,42 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "train_deambooth",
+        "type": "python",
+        "request": "launch",
+        "program": "${workspaceFolder}/train_lora_dreambooth.py",
+        "console": "integratedTerminal",
+        "args": [
+          "--pretrained_model_name_or_path",
+          "stabilityai/stable-diffusion-2-1-base",
+          "--train_text_encoder",
+          "--instance_data_dir",
+          "/home/arif/Documents/design/sandpit/lora/data_example",
+          "--output_dir",
+          "/home/arif/Documents/design/sandpit/lora/output_example",
+          "--instance_prompt",
+          "--Arty Salma",
+          "--resolution",
+          "768",
+          "--train_batch_size",
+          "1",
+          "--gradient_accumulation_steps",
+          "1",
+          "--learning_rate",
+          "1e-6",
+          "--lr_scheduler",
+          "constant",
+          "--lr_warmup_steps",
+          "0",
+          "--max_train_steps",
+          "30000"
+        ],
+        "justMyCode": false
+      }
+    ]
+  }
+  

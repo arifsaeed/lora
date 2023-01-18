@@ -28,6 +28,39 @@ except ImportError:
 
     safetensors_available = False
 
+class LoraInjectedConv(nn.Module):
+    def __init__(self,in_features,out_features,bias=False,r=4):
+        super().__init__()
+        if r > min(in_features, out_features):
+            raise ValueError(
+                f"LoRA rank {r} must be less or equal than {min(in_features, out_features)}"
+            )
+        ##replace existing
+        self.linear=nn.Linear(in_features,out_features,bias)
+        #downsample
+        self.convdown=nn.Conv2d(1,3,3,padding=1)
+        self.convdown=nn.Conv2d(1,3,3,padding=1)
+        self.cdowntransform = nn.Conv2d(out_ch, out_ch, 4, 2, 1)
+
+        #upsample
+        self.convup = nn.Conv2d(2*in_ch, out_ch, 3, padding=1)
+        self.cuptransform = nn.ConvTranspose2d(out_ch, out_ch, 4, 2, 1)       
+
+        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
+        self.bnorm = nn.BatchNorm2d(out_ch)
+        self.relu = nn.ReLU()
+
+        self.scale = 1.0
+        
+    def forward(self,x):
+        x=self.convdown(x)
+        x=self.cdowntransform(x)
+        x=self.convup(x)
+        x=self.cuptransform(x)
+        x=self.conv2(x)
+        x=self.bnorm(x)
+        x.self.relu(x)
+        self.linear(input) + x*self.scale
 
 class LoraInjectedLinear(nn.Module):
     def __init__(self, in_features, out_features, bias=False, r=4):
@@ -39,15 +72,44 @@ class LoraInjectedLinear(nn.Module):
             )
 
         self.linear = nn.Linear(in_features, out_features, bias)
+
+        self.loralinear1 = nn.Linear(out_features, out_features, bias=False)
+        self.bn1=nn.BatchNorm1d(num_features=out_features)
+        self.relu1 = nn.ReLU()
+
         self.lora_down = nn.Linear(in_features, r, bias=False)
+        self.bn2=nn.BatchNorm1d(num_features=r)
+        self.relu2 = nn.ReLU()
+
+        self.lora_down1 = nn.Linear(r, r, bias=False)        
+        self.bnd1=nn.BatchNorm1d(num_features=r)
+        self.relud1 = nn.ReLU()        
+
         self.lora_up = nn.Linear(r, out_features, bias=False)
+        self.bnup=nn.BatchNorm1d(num_features=out_features)
+        self.reluup = nn.ReLU()                
+
+        self.lora_up1 = nn.Linear(out_features, out_features, bias=False)
+        self.bnup1=nn.BatchNorm1d(num_features=out_features)
+        self.reluup1 = nn.ReLU()                
         self.scale = 1.0
 
         nn.init.normal_(self.lora_down.weight, std=1 / r)
+        nn.init.normal_(self.loralinear1.weight, std=1 / r)
+        nn.init.normal_(self.lora_down1.weight, std=1 / r)
+        nn.init.normal_(self.lora_up1.weight, std=1 / r)
+
         nn.init.zeros_(self.lora_up.weight)
 
     def forward(self, input):
-        return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
+        x=self.relu1(self.bn1(self.loralinear1(input)))
+        x= self.relu2(self.bn2(self.lora_down(x)))
+        x= self.relud1(self.bnd1(self.lora_down1(x)))
+        x= self.reluup(self.bnup(self.lora_up(x)))
+        x= self.reluup1(self.bnup1(self.lora_up1(x)))
+        x=x*self.scale
+
+        return self.linear(input) + x#self.lora_up(self.lora_down(input)) * self.scale
 
 
 UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
@@ -169,15 +231,25 @@ def inject_trainable_lora(
         _tmp.to(_child_module.weight.device).to(_child_module.weight.dtype)
         _module._modules[name] = _tmp
 
-        require_grad_params.append(_module._modules[name].lora_up.parameters())
+        require_grad_params.append(_module._modules[name].loralinear1.parameters())
         require_grad_params.append(_module._modules[name].lora_down.parameters())
+        require_grad_params.append(_module._modules[name].lora_down1.parameters())
+        require_grad_params.append(_module._modules[name].lora_up.parameters())        
+        require_grad_params.append(_module._modules[name].lora_up1.parameters())        
 
         if loras != None:
-            _module._modules[name].lora_up.weight = loras.pop(0)
+            _module._modules[name].loralinear1.weight = loras.pop(0)
             _module._modules[name].lora_down.weight = loras.pop(0)
+            _module._modules[name].lora_down1.weight = loras.pop(0)
+            _module._modules[name].lora_up.weight = loras.pop(0)
+            _module._modules[name].lora_up1.weight = loras.pop(0)
 
-        _module._modules[name].lora_up.weight.requires_grad = True
+        _module._modules[name].loralinear1.weight.requires_grad = True
         _module._modules[name].lora_down.weight.requires_grad = True
+        _module._modules[name].lora_down1.weight.requires_grad = True
+        _module._modules[name].lora_up.weight.requires_grad = True
+        _module._modules[name].lora_up1.weight.requires_grad = True
+        
         names.append(name)
 
     return require_grad_params, names
@@ -190,7 +262,7 @@ def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
     for _m, _n, _child_module in _find_modules(
         model, target_replace_module, search_class=[LoraInjectedLinear]
     ):
-        loras.append((_child_module.lora_up, _child_module.lora_down))
+        loras.append((_child_module.loralinear1, _child_module.lora_down,_child_module.lora_down1, _child_module.lora_up, _child_module.lora_up1))
 
     if len(loras) == 0:
         raise ValueError("No lora injected.")
@@ -204,11 +276,14 @@ def save_lora_weight(
     target_replace_module=DEFAULT_TARGET_REPLACE,
 ):
     weights = []
-    for _up, _down in extract_lora_ups_down(
+    for loralinear1, lora_down,lora_down1, lora_up, lora_up1 in extract_lora_ups_down(
         model, target_replace_module=target_replace_module
     ):
-        weights.append(_up.weight.to("cpu").to(torch.float16))
-        weights.append(_down.weight.to("cpu").to(torch.float16))
+        weights.append(loralinear1.weight.to("cpu").to(torch.float16))
+        weights.append(lora_down.weight.to("cpu").to(torch.float16))
+        weights.append(lora_down1.weight.to("cpu").to(torch.float16))
+        weights.append(lora_up.weight.to("cpu").to(torch.float16))
+        weights.append(lora_up1.weight.to("cpu").to(torch.float16))
 
     torch.save(weights, path)
 
