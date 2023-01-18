@@ -444,7 +444,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--use_xformers", action="store_true", help="Whether or not to use xformers"
     )
-
+    parser.add_argument("--modeltoken", type=str,default=None)
     if input_args is not None:
         args = parser.parse_args(input_args)
     else:
@@ -568,12 +568,14 @@ def main(args):
         tokenizer = CLIPTokenizer.from_pretrained(
             args.tokenizer_name,
             revision=args.revision,
+            use_auth_token=args.modeltoken,
         )
     elif args.pretrained_model_name_or_path:
         tokenizer = CLIPTokenizer.from_pretrained(
             args.pretrained_model_name_or_path,
             subfolder="tokenizer",
             revision=args.revision,
+            use_auth_token=args.modeltoken,
         )
 
     # Load models and create wrapper for stable diffusion
@@ -581,26 +583,29 @@ def main(args):
         args.pretrained_model_name_or_path,
         subfolder="text_encoder",
         revision=args.revision,
+        use_auth_token=args.modeltoken,
     )
     vae = AutoencoderKL.from_pretrained(
         args.pretrained_vae_name_or_path or args.pretrained_model_name_or_path,
         subfolder=None if args.pretrained_vae_name_or_path else "vae",
         revision=None if args.pretrained_vae_name_or_path else args.revision,
+        use_auth_token=args.modeltoken,
     )
     unet = UNet2DConditionModel.from_pretrained(
         args.pretrained_model_name_or_path,
         subfolder="unet",
         revision=args.revision,
+        use_auth_token=args.modeltoken,
     )
     unet.requires_grad_(False)
     unet_lora_params, names = inject_trainable_lora(
         unet, r=args.lora_rank, loras=args.resume_unet
     )
 
-    for _up, _down in extract_lora_ups_down(unet):
-        print("Before training: Unet First Layer lora up", _up.weight.data)
-        print("Before training: Unet First Layer lora down", _down.weight.data)
-        break
+    #for _up, _down in extract_lora_ups_down(unet):
+    #    print("Before training: Unet First Layer lora up", _up.weight.data)
+    #    print("Before training: Unet First Layer lora down", _down.weight.data)
+    #    break
 
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
@@ -611,14 +616,14 @@ def main(args):
             target_replace_module=["CLIPAttention"],
             r=args.lora_rank,
         )
-        for _up, _down in extract_lora_ups_down(
-            text_encoder, target_replace_module=["CLIPAttention"]
-        ):
-            print("Before training: text encoder First Layer lora up", _up.weight.data)
-            print(
-                "Before training: text encoder First Layer lora down", _down.weight.data
-            )
-            break
+        #for _up, _down in extract_lora_ups_down(
+        #    text_encoder, target_replace_module=["CLIPAttention"]
+        #):
+        #    print("Before training: text encoder First Layer lora up", _up.weight.data)
+        #    print(
+        #        "Before training: text encoder First Layer lora down", _down.weight.data
+        #    )
+        #    break
 
     if args.use_xformers:
         set_use_memory_efficient_attention_xformers(unet, True)
@@ -929,30 +934,30 @@ def main(args):
                                 target_replace_module=["CLIPAttention"],
                             )
 
-                        for _up, _down in extract_lora_ups_down(pipeline.unet):
-                            print(
-                                "First Unet Layer's Up Weight is now : ",
-                                _up.weight.data,
-                            )
-                            print(
-                                "First Unet Layer's Down Weight is now : ",
-                                _down.weight.data,
-                            )
-                            break
-                        if args.train_text_encoder:
-                            for _up, _down in extract_lora_ups_down(
-                                pipeline.text_encoder,
-                                target_replace_module=["CLIPAttention"],
-                            ):
-                                print(
-                                    "First Text Encoder Layer's Up Weight is now : ",
-                                    _up.weight.data,
-                                )
-                                print(
-                                    "First Text Encoder Layer's Down Weight is now : ",
-                                    _down.weight.data,
-                                )
-                                break
+                        #for _up, _down in extract_lora_ups_down(pipeline.unet):
+                        #    print(
+                        #        "First Unet Layer's Up Weight is now : ",
+                        #        _up.weight.data,
+                        #    )
+                        #    print(
+                        #        "First Unet Layer's Down Weight is now : ",
+                        #        _down.weight.data,
+                        #    )
+                        #    break
+                        #if args.train_text_encoder:
+                        #    for _up, _down in extract_lora_ups_down(
+                        #        pipeline.text_encoder,
+                        #        target_replace_module=["CLIPAttention"],
+                        #    ):
+                        #        print(
+                        #            "First Text Encoder Layer's Up Weight is now : ",
+                        #            _up.weight.data,
+                        #        )
+                        #        print(
+                        #            "First Text Encoder Layer's Down Weight is now : ",
+                        #            _down.weight.data,
+                        #        )
+                        #        break
 
                         last_save = global_step
 
