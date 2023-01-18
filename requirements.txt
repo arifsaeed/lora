@@ -5,3 +5,8 @@ ftfy
 fire
 wandb
 safetensors
+accelerate
+opencv-python
+torchvision
+tensorboard
+modelcards
