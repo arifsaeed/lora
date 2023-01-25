@@ -2,7 +2,7 @@ import json
 import math
 from itertools import groupby
 from typing import Callable, Dict, List, Optional, Set, Tuple, Type, Union
-
+from .attention import ICA
 import numpy as np
 import PIL
 import torch
@@ -28,39 +28,6 @@ except ImportError:
 
     safetensors_available = False
 
-class LoraInjectedConv(nn.Module):
-    def __init__(self,in_features,out_features,bias=False,r=4):
-        super().__init__()
-        if r > min(in_features, out_features):
-            raise ValueError(
-                f"LoRA rank {r} must be less or equal than {min(in_features, out_features)}"
-            )
-        ##replace existing
-        self.linear=nn.Linear(in_features,out_features,bias)
-        #downsample
-        self.convdown=nn.Conv2d(1,3,3,padding=1)
-        self.convdown=nn.Conv2d(1,3,3,padding=1)
-        self.cdowntransform = nn.Conv2d(out_ch, out_ch, 4, 2, 1)
-
-        #upsample
-        self.convup = nn.Conv2d(2*in_ch, out_ch, 3, padding=1)
-        self.cuptransform = nn.ConvTranspose2d(out_ch, out_ch, 4, 2, 1)       
-
-        self.conv2 = nn.Conv2d(out_ch, out_ch, 3, padding=1)
-        self.bnorm = nn.BatchNorm2d(out_ch)
-        self.relu = nn.ReLU()
-
-        self.scale = 1.0
-        
-    def forward(self,x):
-        x=self.convdown(x)
-        x=self.cdowntransform(x)
-        x=self.convup(x)
-        x=self.cuptransform(x)
-        x=self.conv2(x)
-        x=self.bnorm(x)
-        x.self.relu(x)
-        self.linear(input) + x*self.scale
 
 class LoraInjectedLinear(nn.Module):
     def __init__(self, in_features, out_features, bias=False, r=4):
@@ -72,44 +39,15 @@ class LoraInjectedLinear(nn.Module):
             )
 
         self.linear = nn.Linear(in_features, out_features, bias)
-
-        self.loralinear1 = nn.Linear(out_features, out_features, bias=False)
-        self.bn1=nn.BatchNorm1d(num_features=out_features)
-        self.relu1 = nn.ReLU()
-
         self.lora_down = nn.Linear(in_features, r, bias=False)
-        self.bn2=nn.BatchNorm1d(num_features=r)
-        self.relu2 = nn.ReLU()
-
-        self.lora_down1 = nn.Linear(r, r, bias=False)        
-        self.bnd1=nn.BatchNorm1d(num_features=r)
-        self.relud1 = nn.ReLU()        
-
         self.lora_up = nn.Linear(r, out_features, bias=False)
-        self.bnup=nn.BatchNorm1d(num_features=out_features)
-        self.reluup = nn.ReLU()                
-
-        self.lora_up1 = nn.Linear(out_features, out_features, bias=False)
-        self.bnup1=nn.BatchNorm1d(num_features=out_features)
-        self.reluup1 = nn.ReLU()                
         self.scale = 1.0
 
         nn.init.normal_(self.lora_down.weight, std=1 / r)
-        nn.init.normal_(self.loralinear1.weight, std=1 / r)
-        nn.init.normal_(self.lora_down1.weight, std=1 / r)
-        nn.init.normal_(self.lora_up1.weight, std=1 / r)
-
         nn.init.zeros_(self.lora_up.weight)
 
     def forward(self, input):
-        x=self.relu1(self.bn1(self.loralinear1(input)))
-        x= self.relu2(self.bn2(self.lora_down(x)))
-        x= self.relud1(self.bnd1(self.lora_down1(x)))
-        x= self.reluup(self.bnup(self.lora_up(x)))
-        x= self.reluup1(self.bnup1(self.lora_up1(x)))
-        x=x*self.scale
-
-        return self.linear(input) + x#self.lora_up(self.lora_down(input)) * self.scale
+        return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
 
 
 UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
@@ -136,7 +74,41 @@ def _find_children(
             if any([isinstance(module, _class) for _class in search_class]):
                 yield parent, name, module
 
+def _find_modules_attention(
+    model,
+    ancestor_class: Set[str] = DEFAULT_TARGET_REPLACE,
+    search_class: List[Type[nn.Module]] = [nn.Linear],
+    exclude_children_of: Optional[List[Type[nn.Module]]] = [LoraInjectedLinear],
+):
+    """
+    Find all modules of a certain class (or union of classes) that are direct or
+    indirect descendants of other modules of a certain class (or union of classes).
 
+    Returns all matching modules, along with the parent of those moduless and the
+    names they are referenced by.
+    """
+
+    # Get the targets we should replace all linears under
+    ancestors = (
+        module
+        for module in model.modules()
+        if module.__class__.__name__ in ancestor_class
+    )
+
+    # For each target find every linear_class module that isn't a child of a LoraInjectedLinear
+    for ancestor in ancestors:
+        for fullname, module in ancestor.named_modules():
+            if any([isinstance(module, _class) for _class in search_class]):
+                # Find the direct parent if this is a descendant, not a child, of target
+                *path, name = fullname.split(".")
+                parent = ancestor
+                if 'to_out' in path:
+                    if exclude_children_of and any(
+                        [isinstance(parent, _class) for _class in exclude_children_of]
+                    ):
+                        continue
+                    yield parent,name,module
+                
 def _find_modules_v2(
     model,
     ancestor_class: Set[str] = DEFAULT_TARGET_REPLACE,
@@ -172,7 +144,7 @@ def _find_modules_v2(
                     [isinstance(parent, _class) for _class in exclude_children_of]
                 ):
                     continue
-                # Otherwise, yield it
+                # Otherwise, yield it 
                 yield parent, name, module
 
 
@@ -195,6 +167,61 @@ def _find_modules_old(
 
 _find_modules = _find_modules_v2
 
+
+def inject_trainable_Attention(
+    model: nn.Module,
+    target_replace_module: Set[str] = DEFAULT_TARGET_REPLACE,
+    r: int = 4,
+    loras=None,  # path to lora .pt
+):
+    """
+    inject lora into model, and returns lora parameter groups.
+    """
+
+    require_grad_params = []
+    names = []
+
+    if loras != None:
+        loras = torch.load(loras)
+
+    for _module, name, _child_module in _find_modules_attention(
+        model, target_replace_module, search_class=[nn.Linear]
+    ):
+        weight = _child_module.weight
+        bias = _child_module.bias
+
+        _tmp = ICA(_child_module.in_features,context_dim=1024,heads=5,dim_head=64)
+        _tmp.ica_proj_in.weight = weight
+        if bias is not None:
+            _tmp.ica_proj_in.bias = bias
+
+
+        # switch the module
+        _tmp.to(_child_module.weight.device).to(_child_module.weight.dtype)
+        _module._modules[name] = _tmp
+
+        require_grad_params.append(_module._modules[name].ica_to_q.parameters())
+        require_grad_params.append(_module._modules[name].ica_to_k.parameters())
+        require_grad_params.append(_module._modules[name].ica_to_v.parameters())
+        require_grad_params.append(_module._modules[name].ica_to_out.parameters())
+        require_grad_params.append(_module._modules[name].ica_proj_out.parameters())        
+
+        if loras != None:
+            _module._modules[name].ica_to_q.weight = loras.pop(0)
+            _module._modules[name].ica_to_k.weight = loras.pop(0)
+            _module._modules[name].ica_to_v.weight = loras.pop(0)
+            _module._modules[name].ica_to_out.weight = loras.pop(0)
+            _module._modules[name].ica_proj_out.weight = loras.pop(0)
+
+        _module._modules[name].ica_to_q.weight.requires_grad = True
+        _module._modules[name].ica_to_k.weight.requires_grad = True
+        _module._modules[name].ica_to_v.weight.requires_grad = True
+        _module._modules[name].ica_to_out.weight.requires_grad = True
+        _module._modules[name].ica_proj_out.weight.requires_grad = True
+        
+        names.append(name)
+
+    return require_grad_params, names
 
 def inject_trainable_lora(
     model: nn.Module,
@@ -231,29 +258,32 @@ def inject_trainable_lora(
         _tmp.to(_child_module.weight.device).to(_child_module.weight.dtype)
         _module._modules[name] = _tmp
 
-        require_grad_params.append(_module._modules[name].loralinear1.parameters())
+        require_grad_params.append(_module._modules[name].lora_up.parameters())
         require_grad_params.append(_module._modules[name].lora_down.parameters())
-        require_grad_params.append(_module._modules[name].lora_down1.parameters())
-        require_grad_params.append(_module._modules[name].lora_up.parameters())        
-        require_grad_params.append(_module._modules[name].lora_up1.parameters())        
 
         if loras != None:
-            _module._modules[name].loralinear1.weight = loras.pop(0)
-            _module._modules[name].lora_down.weight = loras.pop(0)
-            _module._modules[name].lora_down1.weight = loras.pop(0)
             _module._modules[name].lora_up.weight = loras.pop(0)
-            _module._modules[name].lora_up1.weight = loras.pop(0)
+            _module._modules[name].lora_down.weight = loras.pop(0)
 
-        _module._modules[name].loralinear1.weight.requires_grad = True
-        _module._modules[name].lora_down.weight.requires_grad = True
-        _module._modules[name].lora_down1.weight.requires_grad = True
         _module._modules[name].lora_up.weight.requires_grad = True
-        _module._modules[name].lora_up1.weight.requires_grad = True
-        
+        _module._modules[name].lora_down.weight.requires_grad = True
         names.append(name)
 
     return require_grad_params, names
 
+def extract_lora_ica(model, target_replace_module=DEFAULT_TARGET_REPLACE):
+
+    loras = []
+
+    for _m, _n, _child_module in _find_modules_v2(
+        model, target_replace_module, search_class=[ICA],exclude_children_of=None
+    ):
+        loras.append((_child_module.ica_to_q, _child_module.ica_to_k,_child_module.ica_to_v, _child_module.ica_to_out, _child_module.ica_proj_out))
+
+    if len(loras) == 0:
+        raise ValueError("No lora injected.")
+
+    return loras
 
 def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
 
@@ -262,7 +292,7 @@ def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
     for _m, _n, _child_module in _find_modules(
         model, target_replace_module, search_class=[LoraInjectedLinear]
     ):
-        loras.append((_child_module.loralinear1, _child_module.lora_down,_child_module.lora_down1, _child_module.lora_up, _child_module.lora_up1))
+        loras.append((_child_module.lora_up, _child_module.lora_down))
 
     if len(loras) == 0:
         raise ValueError("No lora injected.")
@@ -270,23 +300,36 @@ def extract_lora_ups_down(model, target_replace_module=DEFAULT_TARGET_REPLACE):
     return loras
 
 
+def save_lora_attn_weight(
+    model,
+    path="./lora.pt",
+    target_replace_module=DEFAULT_TARGET_REPLACE,
+):
+    weights = []
+    for ica_to_q, ica_to_k,ica_to_v, ica_to_out, ica_proj_out in extract_lora_ica(
+        model, target_replace_module=target_replace_module
+    ):
+        weights.append(ica_to_q.weight.to("cpu").to(torch.float16))
+        weights.append(ica_to_k.weight.to("cpu").to(torch.float16))
+        weights.append(ica_to_v.weight.to("cpu").to(torch.float16))
+        weights.append(ica_to_out.weight.to("cpu").to(torch.float16))
+        weights.append(ica_proj_out.weight.to("cpu").to(torch.float16))
+
+    torch.save(weights, path)
+
 def save_lora_weight(
     model,
     path="./lora.pt",
     target_replace_module=DEFAULT_TARGET_REPLACE,
 ):
     weights = []
-    for loralinear1, lora_down,lora_down1, lora_up, lora_up1 in extract_lora_ups_down(
+    for _up, _down in extract_lora_ups_down(
         model, target_replace_module=target_replace_module
     ):
-        weights.append(loralinear1.weight.to("cpu").to(torch.float16))
-        weights.append(lora_down.weight.to("cpu").to(torch.float16))
-        weights.append(lora_down1.weight.to("cpu").to(torch.float16))
-        weights.append(lora_up.weight.to("cpu").to(torch.float16))
-        weights.append(lora_up1.weight.to("cpu").to(torch.float16))
+        weights.append(_up.weight.to("cpu").to(torch.float16))
+        weights.append(_down.weight.to("cpu").to(torch.float16))
 
     torch.save(weights, path)
-
 
 def save_lora_as_json(model, path="./lora.json"):
     weights = []

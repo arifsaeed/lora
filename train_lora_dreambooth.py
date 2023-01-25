@@ -35,6 +35,7 @@ from lora_diffusion import (
     inject_trainable_lora,
     safetensors_available,
     save_lora_weight,
+    save_lora_attn_weight,
     save_safeloras,
 )
 from lora_diffusion.xformers_utils import set_use_memory_efficient_attention_xformers
@@ -251,7 +252,7 @@ def parse_args(input_args=None):
         "--output_format",
         type=str,
         choices=["pt", "safe", "both"],
-        default="both",
+        default="pt",
         help="The output format of the model predicitions and checkpoints.",
     )
     parser.add_argument(
@@ -293,7 +294,7 @@ def parse_args(input_args=None):
         default=1,
         help="Batch size (per device) for sampling images.",
     )
-    parser.add_argument("--num_train_epochs", type=int, default=1)
+    parser.add_argument("--num_train_epochs", type=int, default=20)
     parser.add_argument(
         "--max_train_steps",
         type=int,
@@ -599,7 +600,7 @@ def main(args):
     )
     unet.requires_grad_(False)
     unet_lora_params, names = inject_trainable_lora(
-        unet, r=args.lora_rank, loras=args.resume_unet
+        unet, target_replace_module={"CrossAttention"},r=args.lora_rank, loras=args.resume_unet
     )
 
     #for _up, _down in extract_lora_ups_down(unet):
@@ -616,6 +617,8 @@ def main(args):
             target_replace_module=["CLIPAttention"],
             r=args.lora_rank,
         )
+
+        #************* PRINTS FIRST LAYER TO CONSOLE *******************************
         #for _up, _down in extract_lora_ups_down(
         #    text_encoder, target_replace_module=["CLIPAttention"]
         #):
@@ -926,7 +929,8 @@ def main(args):
                         )
                         filename_text_encoder = f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.text_encoder.pt"
                         print(f"save weights {filename_unet}, {filename_text_encoder}")
-                        save_lora_weight(pipeline.unet, filename_unet)
+
+                        save_lora_attn_weight(pipeline.unet, filename_unet,target_replace_module={"CrossAttention"})
                         if args.train_text_encoder:
                             save_lora_weight(
                                 pipeline.text_encoder,
@@ -982,7 +986,7 @@ def main(args):
         print("\n\nLora TRAINING DONE!\n\n")
 
         if args.output_format == "pt" or args.output_format == "both":
-            save_lora_weight(pipeline.unet, args.output_dir + "/lora_weight.pt")
+            save_lora_attn_weight(pipeline.unet, args.output_dir + "/lora_weight.pt",target_replace_module={"CrossAttention"})
             if args.train_text_encoder:
                 save_lora_weight(
                     pipeline.text_encoder,
