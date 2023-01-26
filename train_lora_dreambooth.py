@@ -79,6 +79,8 @@ class DreamBoothDataset(Dataset):
 
         self.instance_images_path = list(Path(instance_data_root).iterdir())
         self.num_instance_images = len(self.instance_images_path)
+        print(f"number of instance images {self.num_instance_images}")
+        print(self.instance_images_path)
         self.instance_prompt = instance_prompt
         self._length = self.num_instance_images
 
@@ -87,6 +89,8 @@ class DreamBoothDataset(Dataset):
             self.class_data_root.mkdir(parents=True, exist_ok=True)
             self.class_images_path = list(self.class_data_root.iterdir())
             self.num_class_images = len(self.class_images_path)
+            print(f"number of class images {self.num_class_images}")
+            print(self.class_images_path)
             self._length = max(self.num_class_images, self.num_instance_images)
             self.class_prompt = class_prompt
         else:
