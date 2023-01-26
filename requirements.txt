@@ -6,7 +6,8 @@ fire
 wandb
 safetensors
 accelerate
-opencv-python
 torchvision
 tensorboard
 modelcards
+einops
+opencv-python-headless
