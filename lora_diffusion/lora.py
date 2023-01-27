@@ -50,7 +50,7 @@ class LoraInjectedLinear(nn.Module):
         return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
 
 
-UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
+UNET_DEFAULT_TARGET_REPLACE = {"Attention", "GEGLU"}
 TEXT_ENCODER_DEFAULT_TARGET_REPLACE = {"CLIPAttention"}
 
 DEFAULT_TARGET_REPLACE = UNET_DEFAULT_TARGET_REPLACE
@@ -576,6 +576,52 @@ def monkeypatch_lora(
 
         _module._modules[name].to(weight.device)
 
+def monkeypatch_replace_attnlora(
+    model, loras, target_replace_module=DEFAULT_TARGET_REPLACE
+):
+
+    for _module, name, _child_module in _find_modules_attention(
+        model, target_replace_module, search_class=[nn.Linear]
+    ):
+        weight = _child_module.weight
+        bias = _child_module.bias
+
+        _tmp = ICA(_child_module.in_features,context_dim=1024,heads=5,dim_head=64)
+        _tmp.ica_proj_in.weight = weight
+        if bias is not None:
+            _tmp.ica_proj_in.bias = bias
+
+
+        # switch the module
+        #_tmp.to(_child_module.weight.device).to(_child_module.weight.dtype)
+        _module._modules[name] = _tmp
+
+        ica_to_q=loras.pop(0) 
+        ica_to_k=loras.pop(0) 
+        ica_to_v=loras.pop(0) 
+        ica_to_out=loras.pop(0) 
+        ica_proj_out=loras.pop(0) 
+       # up_weight = loras.pop(0)
+       # down_weight = loras.pop(0)
+
+
+        _module._modules[name].ica_to_q.weight = nn.Parameter(
+            ica_to_q.type(weight.dtype)
+        )
+        _module._modules[name].ica_to_k.weight = nn.Parameter(
+            ica_to_k.type(weight.dtype)
+        )
+        _module._modules[name].ica_to_v.weight = nn.Parameter(
+            ica_to_v.type(weight.dtype)
+        )
+        _module._modules[name].ica_to_out.weight = nn.Parameter(
+            ica_to_out.type(weight.dtype)
+        )
+        _module._modules[name].ica_proj_out.weight = nn.Parameter(
+            ica_proj_out.type(weight.dtype)
+        )
+
+        _module._modules[name].to(weight.device)
 
 def monkeypatch_replace_lora(
     model, loras, target_replace_module=DEFAULT_TARGET_REPLACE, r: int = 4

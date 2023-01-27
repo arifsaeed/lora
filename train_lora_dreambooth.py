@@ -33,6 +33,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 from lora_diffusion import (
     extract_lora_ups_down,
     inject_trainable_lora,
+    inject_trainable_Attention,
     safetensors_available,
     save_lora_weight,
     save_lora_attn_weight,
@@ -604,6 +605,9 @@ def main(args):
     )
     unet.requires_grad_(False)
     unet_lora_params, names = inject_trainable_lora(
+        unet,r=args.lora_rank, loras=args.resume_unet
+    )
+    unet_lora_attn_params, names = inject_trainable_Attention(
         unet, target_replace_module={"CrossAttention"},r=args.lora_rank, loras=args.resume_unet
     )
 
@@ -621,7 +625,6 @@ def main(args):
             target_replace_module=["CLIPAttention"],
             r=args.lora_rank,
         )
-
         #************* PRINTS FIRST LAYER TO CONSOLE *******************************
         #for _up, _down in extract_lora_ups_down(
         #    text_encoder, target_replace_module=["CLIPAttention"]
@@ -671,13 +674,14 @@ def main(args):
     params_to_optimize = (
         [
             {"params": itertools.chain(*unet_lora_params), "lr": args.learning_rate},
+            {"params": itertools.chain(*unet_lora_attn_params), "lr": args.learning_rate},
             {
                 "params": itertools.chain(*text_encoder_lora_params),
                 "lr": text_lr,
             },
         ]
         if args.train_text_encoder
-        else itertools.chain(*unet_lora_params)
+        else [{itertools.chain(*unet_lora_params)},{"params": itertools.chain(*unet_lora_attn_params), "lr": args.learning_rate}]
     )
     optimizer = optimizer_class(
         params_to_optimize,
