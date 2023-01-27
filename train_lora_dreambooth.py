@@ -932,13 +932,18 @@ def main(args):
                             revision=args.revision,
                         )
 
-                        filename_unet = (
-                            f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.pt"
+                        filename_unet_att = (
+                            f"{args.output_dir}/lora_weight_attn_e{epoch}_s{global_step}.pt"
+                        )
+                        filename_unet_lin= (
+                            f"{args.output_dir}/lora_weight_lin_e{epoch}_s{global_step}.pt"
                         )
                         filename_text_encoder = f"{args.output_dir}/lora_weight_e{epoch}_s{global_step}.text_encoder.pt"
-                        print(f"save weights {filename_unet}, {filename_text_encoder}")
 
-                        save_lora_attn_weight(pipeline.unet, filename_unet,target_replace_module={"CrossAttention"})
+                        print(f"save weights {filename_unet_att},{filename_unet_lin}, {filename_text_encoder}")
+
+                        save_lora_attn_weight(pipeline.unet, filename_unet_att,target_replace_module={"CrossAttention"})
+                        save_lora_weight(pipeline.unet,filename_unet_lin,target_replace_module={"Attention", "GEGLU"})
                         if args.train_text_encoder:
                             save_lora_weight(
                                 pipeline.text_encoder,
@@ -994,7 +999,8 @@ def main(args):
         print("\n\nLora TRAINING DONE!\n\n")
 
         if args.output_format == "pt" or args.output_format == "both":
-            save_lora_attn_weight(pipeline.unet, args.output_dir + "/lora_weight.pt",target_replace_module={"CrossAttention"})
+            save_lora_attn_weight(pipeline.unet, args.output_dir + "/lora_attn_weight.pt",target_replace_module={"CrossAttention"})
+            save_lora_weight(pipeline.unet,args.output_dir + "/lora_lin_weight.pt",target_replace_module={"Attention", "GEGLU"})
             if args.train_text_encoder:
                 save_lora_weight(
                     pipeline.text_encoder,
