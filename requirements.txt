@@ -11,3 +11,7 @@ tensorboard
 modelcards
 einops
 opencv-python-headless
+mediapipe
+fire
+wandb
+mediapipe

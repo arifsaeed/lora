@@ -504,6 +504,7 @@ def train(
     placeholder_token_at_data: Optional[str] = None,
     initializer_tokens: Optional[str] = None,
     class_prompt: Optional[str] = None,
+    instance_prompt:Optional[str] = None,
     with_prior_preservation: bool = False,
     prior_loss_weight: float = 1.0,
     num_class_images: int = 100,
@@ -615,7 +616,7 @@ def train(
         instance_data_root=instance_data_dir,
         stochastic_attribute=stochastic_attribute,
         token_map=token_map,
-        use_template=use_template,
+        instance_prompt=instance_prompt,
         class_data_root=class_data_dir if with_prior_preservation else None,
         class_prompt=class_prompt,
         tokenizer=tokenizer,
@@ -766,5 +767,424 @@ def train(
     )
 
 
+
+def parse_args(input_args=None):
+    parser = argparse.ArgumentParser(description="Simple example of a training script.")
+
+    parser.add_argument(
+        "--pretrained_model_name_or_path",
+        type=str,
+        default=None,
+        required=True,
+        help="Path to pretrained model or model identifier from huggingface.co/models.",
+    )
+    parser.add_argument(
+        "--instance_data_dir",
+        type=str,
+        default=None,
+        required=True,
+        help="A folder containing the training data of instance images.",
+    )
+    parser.add_argument(
+        "--class_data_dir",
+        type=str,
+        default=None,
+        required=False,
+        help="A folder containing the training data of class images.",
+    )
+    parser.add_argument(
+        "--class_prompt",
+        type=str,
+        default=None,
+        help="The prompt to specify images in the same class as provided instance images.",
+    )
+    parser.add_argument(
+        "--with_prior_preservation",
+        default=False,
+        action="store_true",
+        help="Flag to add prior preservation loss.",
+    )
+    parser.add_argument(
+        "--prior_loss_weight",
+        type=float,
+        default=1.0,
+        help="The weight of prior preservation loss.",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="text-inversion-model",
+        help="The output directory where the model predictions and checkpoints will be written.",
+    )
+    parser.add_argument(
+        "--output_format",
+        type=str,
+        choices=["pt", "safe", "both"],
+        default="pt",
+        help="The output format of the model predicitions and checkpoints.",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=None, help="A seed for reproducible training."
+    )
+    parser.add_argument(
+        "--resolution",
+        type=int,
+        default=512,
+        help=(
+            "The resolution for input images, all the images in the train/validation dataset will be resized to this"
+            " resolution"
+        ),
+    )
+    parser.add_argument(
+        "--center_crop",
+        action="store_true",
+        help="Whether to center crop images before resizing to resolution",
+    )
+    parser.add_argument(
+        "--color_jitter",
+        action="store_true",
+        help="Whether to apply color jitter to images",
+    )
+    parser.add_argument(
+        "--train_text_encoder",
+        action="store_true",
+        help="Whether to train the text encoder",
+    )
+    parser.add_argument(
+        "--train_batch_size",
+        type=int,
+        default=1,
+        help="Batch size (per device) for the training dataloader.",
+    )
+    parser.add_argument(
+        "--sample_batch_size",
+        type=int,
+        default=1,
+        help="Batch size (per device) for sampling images.",
+    )
+    parser.add_argument("--num_train_epochs", type=int, default=20)
+    parser.add_argument(
+        "--max_train_steps",
+        type=int,
+        default=None,
+        help="Total number of training steps to perform.  If provided, overrides num_train_epochs.",
+    )
+    parser.add_argument(
+        "--save_steps",
+        type=int,
+        default=500,
+        help="Save checkpoint every X updates steps.",
+    )
+    parser.add_argument(
+        "--gradient_accumulation_steps",
+        type=int,
+        default=1,
+        help="Number of updates steps to accumulate before performing a backward/update pass.",
+    )
+    parser.add_argument(
+        "--gradient_checkpointing",
+        action="store_true",
+        help="Whether or not to use gradient checkpointing to save memory at the expense of slower backward pass.",
+    )
+    parser.add_argument(
+        "--learning_rate",
+        type=float,
+        default=None,
+        help="Initial learning rate (after the potential warmup period) to use.",
+    )
+    parser.add_argument(
+        "--learning_rate_text",
+        type=float,
+        default=5e-6,
+        help="Initial learning rate for text encoder (after the potential warmup period) to use.",
+    )
+    parser.add_argument(
+        "--scale_lr",
+        action="store_true",
+        default=False,
+        help="Scale the learning rate by the number of GPUs, gradient accumulation steps, and batch size.",
+    )
+    parser.add_argument(
+        "--lr_scheduler",
+        type=str,
+        default="constant",
+        help=(
+            'The scheduler type to use. Choose between ["linear", "cosine", "cosine_with_restarts", "polynomial",'
+            ' "constant", "constant_with_warmup"]'
+        ),
+    )
+    parser.add_argument(
+        "--lr_warmup_steps",
+        type=int,
+        default=500,
+        help="Number of steps for the warmup in the lr scheduler.",
+    )
+    parser.add_argument(
+        "--use_8bit_adam",
+        action="store_true",
+        help="Whether or not to use 8-bit Adam from bitsandbytes.",
+    )
+    parser.add_argument(
+        "--adam_beta1",
+        type=float,
+        default=0.9,
+        help="The beta1 parameter for the Adam optimizer.",
+    )
+    parser.add_argument(
+        "--adam_beta2",
+        type=float,
+        default=0.999,
+        help="The beta2 parameter for the Adam optimizer.",
+    )
+    parser.add_argument(
+        "--adam_weight_decay", type=float, default=1e-2, help="Weight decay to use."
+    )
+    parser.add_argument(
+        "--adam_epsilon",
+        type=float,
+        default=1e-08,
+        help="Epsilon value for the Adam optimizer",
+    )
+    parser.add_argument(
+        "--max_grad_norm", default=1.0, type=float, help="Max gradient norm."
+    )
+    parser.add_argument(
+        "--push_to_hub",
+        action="store_true",
+        help="Whether or not to push the model to the Hub.",
+    )
+    parser.add_argument(
+        "--hub_token",
+        type=str,
+        default=None,
+        help="The token to use to push to the Model Hub.",
+    )
+    parser.add_argument(
+        "--logging_dir",
+        type=str,
+        default="logs",
+        help=(
+            "[TensorBoard](https://www.tensorflow.org/tensorboard) log directory. Will default to"
+            " *output_dir/runs/**CURRENT_DATETIME_HOSTNAME***."
+        ),
+    )
+    parser.add_argument(
+        "--mixed_precision",
+        type=str,
+        default=None,
+        choices=["no", "fp16", "bf16"],
+        help=(
+            "Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >="
+            " 1.10.and an Nvidia Ampere GPU.  Default to the value of accelerate config of the current system or the"
+            " flag passed with the `accelerate.launch` command. Use this argument to override the accelerate config."
+        ),
+    )
+    parser.add_argument(
+        "--local_rank",
+        type=int,
+        default=-1,
+        help="For distributed training: local_rank",
+    )
+    parser.add_argument(
+        "--resume_unet",
+        type=str,
+        default=None,
+        help=("File path for unet lora to resume training."),
+    )
+    parser.add_argument(
+        "--resume_text_encoder",
+        type=str,
+        default=None,
+        help=("File path for text encoder lora to resume training."),
+    )
+    parser.add_argument(
+        "--resize",
+        type=bool,
+        default=True,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--learning_rate_unet",
+        type=float,
+        default=1e-4,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--learning_rate_ti",
+        type=float,
+        default=5e-4,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--lr_scheduler_lora",
+        type=str,
+        default="linear",
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--lr_warmup_steps_lora",
+        type=int,
+        default=100,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--placeholder_tokens",
+        type=str,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--placeholder_token_at_data",
+        type=str,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--use_template",
+        type=str,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--max_train_steps_ti",
+        type=int,
+        default=1000,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--max_train_steps_tuning",
+        type=int,
+        default=1000,
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--perform_inversion",
+        action="store_true",
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--clip_ti_decay",
+        action="store_true",
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--weight_decay_ti",
+        type=float,
+        default="0.000",
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--weight_decay_lora",
+        type=float,
+        default="0.001",
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--continue_inversion", action="store_true", help="Whether or not to continue?"
+    )
+    parser.add_argument(
+        "--continue_inversion_lr",
+        type=float,
+        default="1e-4",
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--lora_rank",
+        type=int,
+        default="1",
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--num_class_images",
+        type=int,
+        default="100",
+        required=False,
+        help="Should images be resized to --resolution before training?",
+    )
+    parser.add_argument(
+        "--use_xformers", action="store_true", help="Whether or not to use xformers"
+    )
+    parser.add_argument("--instance_prompt", type=str,default=None)
+    parser.add_argument("--modeltoken", type=str,default=None)
+    parser.add_argument("--use_face_segmentation_condition", action="store_true",required=False)
+    if input_args is not None:
+        args = parser.parse_args(input_args)
+    else:
+        args = parser.parse_args()
+
+    env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
+    if env_local_rank != -1 and env_local_rank != args.local_rank:
+        args.local_rank = env_local_rank
+
+
+    return args
+
+#def main():
+#    fire.Fire(train)
 def main():
-    fire.Fire(train)
+    args=parse_args()
+    train(instance_data_dir=args.instance_data_dir,
+        pretrained_model_name_or_path=args.pretrained_model_name_or_path,
+        output_dir=args.output_dir,
+        train_text_encoder=args.train_text_encoder,
+        pretrained_vae_name_or_path=None,
+        class_data_dir=args.class_data_dir,
+        stochastic_attribute=None,
+        perform_inversion=args.perform_inversion,
+        use_template=args.use_template,
+        placeholder_tokens=args.placeholder_tokens,
+        placeholder_token_at_data=args.placeholder_token_at_data,
+        initializer_tokens=None,
+        class_prompt=args.class_prompt,
+        instance_prompt=args.instance_prompt,
+        with_prior_preservation=args.with_prior_preservation,
+        prior_loss_weight=args.prior_loss_weight,
+        num_class_images=args.num_class_images,
+        resolution=args.resolution,
+        color_jitter=args.color_jitter,
+        train_batch_size=args.train_batch_size,
+        sample_batch_size=args.sample_batch_size,
+        max_train_steps_tuning=args.max_train_steps_tuning,
+        max_train_steps_ti=args.max_train_steps_ti,
+        save_steps=args.save_steps,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        gradient_checkpointing=args.gradient_checkpointing,
+        mixed_precision=args.mixed_precision,
+        lora_rank=args.lora_rank,
+        lora_unet_target_modules={"CrossAttention", "Attention", "GEGLU"},
+        lora_clip_target_modules={"CLIPAttention"},
+        clip_ti_decay=args.clip_ti_decay,
+        learning_rate_unet=args.learning_rate_unet,
+        learning_rate_text=args.learning_rate_text,
+        learning_rate_ti=args.learning_rate_ti,
+        continue_inversion=args.continue_inversion,
+        continue_inversion_lr=args.continue_inversion_lr,
+        use_face_segmentation_condition=args.use_face_segmentation_condition,
+        scale_lr=args.scale_lr,
+        lr_scheduler=args.lr_scheduler,
+        lr_warmup_steps=args.lr_warmup_steps,
+        lr_scheduler_lora=args.lr_scheduler_lora,
+        lr_warmup_steps_lora=args.lr_warmup_steps_lora,
+        weight_decay_ti=args.weight_decay_ti,
+        weight_decay_lora=args.weight_decay_lora,
+        use_8bit_adam=args.use_8bit_adam,
+        device="cuda:0",
+        log_wandb = False,
+        wandb_log_prompt_cnt = 10,
+        wandb_project_name = "new_pti_project",
+        wandb_entity = "new_pti_entity")
+
+main()

@@ -86,7 +86,7 @@ class PivotalTuningDatasetCapation(Dataset):
         stochastic_attribute,
         tokenizer,
         token_map: Optional[dict] = None,
-        use_template: Optional[str] = None,
+        instance_prompt: Optional[str] = None,
         class_data_root=None,
         class_prompt=None,
         size=512,
@@ -108,8 +108,8 @@ class PivotalTuningDatasetCapation(Dataset):
         self.num_instance_images = len(self.instance_images_path)
         self.token_map = token_map
 
-        self.use_template = use_template
-        self.templates = OBJECT_TEMPLATE if use_template == "object" else STYLE_TEMPLATE
+        self.instance_prompt = instance_prompt
+        #self.templates = OBJECT_TEMPLATE if use_template == "object" else STYLE_TEMPLATE
 
         self._length = self.num_instance_images
 
@@ -160,17 +160,17 @@ class PivotalTuningDatasetCapation(Dataset):
             instance_image = instance_image.convert("RGB")
         example["instance_images"] = self.image_transforms(instance_image)
 
-        if self.use_template:
-            assert self.token_map is not None
-            input_tok = list(self.token_map.values())[0]
+        #if self.use_template:
+        #    assert self.token_map is not None
+        #    input_tok = list(self.token_map.values())[0]
 
-            text = random.choice(self.templates).format(input_tok)
-        else:
-            text = self.instance_images_path[index % self.num_instance_images].stem
-            if self.token_map is not None:
-                for token, value in self.token_map.items():
-                    text = text.replace(token, value)
-
+        #    text = random.choice(self.templates).format(input_tok)
+        #else:
+        #    text = self.instance_images_path[index % self.num_instance_images].stem
+        #    if self.token_map is not None:
+        #        for token, value in self.token_map.items():
+        #            text = text.replace(token, value)
+        text=self.instance_prompt
         print(text)
 
         if self.use_face_segmentation_condition:

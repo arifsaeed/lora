@@ -20,8 +20,9 @@ lora_pti \
   --lr_warmup_steps=0 \
   --lr_scheduler_lora="linear" \
   --lr_warmup_steps_lora=100 \
-  --placeholder_tokens="<s1>|<s2>" \
-  --use_template="style"\
+  --placeholder_tokens="renwa" \
+  --placeholder_token_at_data="woman|renwa"\
+  --use_template="an image of renwa"\
   --save_steps=100 \
   --max_train_steps_ti=1000 \
   --max_train_steps_tuning=1000 \

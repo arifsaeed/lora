@@ -129,7 +129,7 @@ lora_pti \
   --instance_data_dir=$INSTANCE_DIR \
   --output_dir=$OUTPUT_DIR \
   --train_text_encoder \
-  --resolution=512 \
+  --resolution=768 \
   --train_batch_size=1 \
   --gradient_accumulation_steps=4 \
   --scale_lr \
@@ -152,7 +152,7 @@ lora_pti \
   --continue_inversion_lr=1e-4 \
   --device="cuda:0" \
   --lora_rank=1 \
-#  --use_face_segmentation_condition\
+  --use_face_segmentation_condition
 ```
 
 [Check here to see what these parameters mean](https://github.com/cloneofsimo/lora/discussions/121).
