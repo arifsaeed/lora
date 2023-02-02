@@ -1,13 +1,19 @@
-export MODEL_NAME="runwayml/stable-diffusion-v1-5"
-export INSTANCE_DIR="./data/data_disney"
-export OUTPUT_DIR="./exps/output_dsn"
+export MODEL_NAME="stabilityai/stable-diffusion-2-1-base"
+export INSTANCE_DIR="/workspace/lora/renwa768"
+export CLASS_DIR="/workspace/lora/Women_200"
+export OUTPUT_DIR="/workspace/lora/output"
+export MODEL_TOKEN=
 
-lora_pti \
+accelerate launch cli_lora_pti.py \
   --pretrained_model_name_or_path=$MODEL_NAME  \
+  --train_text_encoder \
   --instance_data_dir=$INSTANCE_DIR \
   --output_dir=$OUTPUT_DIR \
-  --train_text_encoder \
-  --resolution=512 \
+  --class_data_dir=$CLASS_DIR \
+  --instance_prompt="an image of renwa" \
+  --class_prompt="an image of a woman" \
+  --with_prior_preservation \
+  --resolution=768 \
   --train_batch_size=1 \
   --gradient_accumulation_steps=4 \
   --gradient_checkpointing \
@@ -22,16 +28,16 @@ lora_pti \
   --lr_warmup_steps_lora=100 \
   --placeholder_tokens="renwa" \
   --placeholder_token_at_data="woman|renwa"\
-  --use_template="an image of renwa"\
   --save_steps=100 \
   --max_train_steps_ti=1000 \
   --max_train_steps_tuning=1000 \
-  --perform_inversion=True \
+  --perform_inversion \
   --clip_ti_decay \
   --weight_decay_ti=0.000 \
   --weight_decay_lora=0.001\
   --continue_inversion \
   --continue_inversion_lr=1e-4 \
-  --device="cuda:0" \
   --lora_rank=1 \
-#  --use_face_segmentation_condition\
+  --use_face_segmentation_condition\
+  --modeltoken=$MODEL_TOKEN
+  

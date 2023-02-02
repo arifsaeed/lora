@@ -175,6 +175,7 @@ def loss_step(
     scheduler,
     t_mutliplier=1.0,
     mixed_precision=False,
+    batch_size=1
 ):
     weight_dtype = torch.float32
 
@@ -225,7 +226,7 @@ def loss_step(
             batch["mask"]
             .to(model_pred.device)
             .reshape(
-                model_pred.shape[0], 1, model_pred.shape[2] * 8, model_pred.shape[3] * 8
+                batch_size, 1, model_pred.shape[2] * 8, model_pred.shape[3] * 8
             )
         )
         # resize to match model_pred
@@ -240,11 +241,12 @@ def loss_step(
 
         mask = mask / mask.mean()
 
-        model_pred = model_pred * mask
+        model_pred[0:batch_size] = model_pred[0:batch_size] * mask
 
-        target = target * mask
+        target[0:batch_size] = target[0:batch_size] * mask
 
     loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+    print(f"loss: {loss}")
     return loss
 
 
@@ -270,6 +272,7 @@ def train_inversion(
     class_token: str = "person",
     mixed_precision: bool = False,
     clip_ti_decay: bool = True,
+    batch_size: int=1
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -301,6 +304,7 @@ def train_inversion(
                         text_encoder,
                         scheduler,
                         mixed_precision=mixed_precision,
+                        batch_size=batch_size
                     )
                     / accum_iter
                 )
@@ -418,6 +422,7 @@ def perform_tuning(
     placeholder_tokens,
     save_path,
     lr_scheduler_lora,
+    batch_size
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -443,6 +448,7 @@ def perform_tuning(
                 scheduler,
                 t_mutliplier=0.8,
                 mixed_precision=True,
+                batch_size=batch_size
             )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
@@ -686,6 +692,7 @@ def train(
             mixed_precision=False,
             tokenizer=tokenizer,
             clip_ti_decay=clip_ti_decay,
+            batch_size=train_batch_size
         )
 
         del ti_optimizer
@@ -764,6 +771,7 @@ def train(
         placeholder_token_ids=placeholder_token_ids,
         save_path=output_dir,
         lr_scheduler_lora=lr_scheduler_lora,
+        batch_size=train_batch_size
     )
 
 
