@@ -471,8 +471,9 @@ def perform_tuning(
                     placeholder_token_ids=placeholder_token_ids,
                     placeholder_tokens=placeholder_tokens,
                     save_path=os.path.join(
-                        save_path, f"step_{global_step}.safetensors"
+                        save_path, f"step_{global_step}_lora.pt"
                     ),
+                    safe_form=False
                 )
                 moved = (
                     torch.tensor(list(itertools.chain(*inspect_lora(unet).values())))

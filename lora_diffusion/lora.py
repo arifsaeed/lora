@@ -8,7 +8,7 @@ import PIL
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+import pickle
 try:
     from safetensors.torch import safe_open
     from safetensors.torch import save_file as safe_save
@@ -50,7 +50,7 @@ class LoraInjectedLinear(nn.Module):
         return self.linear(input) + self.lora_up(self.lora_down(input)) * self.scale
 
 
-UNET_DEFAULT_TARGET_REPLACE = {"Attention", "GEGLU"}
+UNET_DEFAULT_TARGET_REPLACE = {"CrossAttention", "Attention", "GEGLU"}
 TEXT_ENCODER_DEFAULT_TARGET_REPLACE = {"CLIPAttention"}
 
 DEFAULT_TARGET_REPLACE = UNET_DEFAULT_TARGET_REPLACE
@@ -343,6 +343,43 @@ def save_lora_as_json(model, path="./lora.json"):
         json.dump(weights, f)
 
 
+
+def pickle_loras_with_embeds(
+    modelmap: Dict[str, Tuple[nn.Module, Set[str]]] = {},
+    embeds: Dict[str, torch.Tensor] = {},
+    outpath="./lora.safetensors",
+):
+    """
+    Saves the Lora from multiple modules in a single safetensor file.
+
+    modelmap is a dictionary of {
+        "module name": (module, target_replace_module)
+    }
+    """
+    weights = {}
+    metadata = {}
+
+    for name, (model, target_replace_module) in modelmap.items():
+        metadata[name] = json.dumps(list(target_replace_module))
+
+        for i, (_up, _down) in enumerate(
+            extract_lora_ups_down(model, target_replace_module)
+        ):
+            metadata[f"{name}:{i}:rank"] = str(_down.out_features)
+            weights[f"{name}:{i}:up"] = _up.weight
+            weights[f"{name}:{i}:down"] = _down.weight
+
+    for token, tensor in embeds.items():
+        metadata[token] = EMBED_FLAG
+        weights[token] = tensor
+
+    print(f"Saving weights to {outpath}")
+    save_obj={'weights':weights,'metadata':metadata}
+    #pickle_file=outpath + 'lora_embeds.pickle'
+    with open(outpath, 'wb') as handle:
+        pickle.dump(save_obj, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    
+
 def save_safeloras_with_embeds(
     modelmap: Dict[str, Tuple[nn.Module, Set[str]]] = {},
     embeds: Dict[str, torch.Tensor] = {},
@@ -373,6 +410,7 @@ def save_safeloras_with_embeds(
         weights[token] = tensor
 
     print(f"Saving weights to {outpath}")
+
     safe_save(weights, outpath, metadata)
 
 
@@ -702,6 +740,20 @@ def monkeypatch_or_replace_lora(
         _module._modules[name].to(weight.device)
 
 
+def monkeypatch_or_replace_pickleloras(models, safeloras):
+    metadata=safeloras['metadata']
+    weight=safeloras['weights']
+    loras = parse_safeloras(safeloras)
+
+    for name, (lora, ranks, target) in loras.items():
+        model = getattr(models, name, None)
+
+        if not model:
+            print(f"No model provided for {name}, contained in Lora")
+            continue
+
+        monkeypatch_or_replace_lora(model, lora, target, ranks)
+
 def monkeypatch_or_replace_safeloras(models, safeloras):
     loras = parse_safeloras(safeloras)
 
@@ -983,3 +1035,5 @@ def save_all(
                 embeds[tok] = learned_embeds.detach().cpu()
 
         save_safeloras_with_embeds(loras, embeds, save_path)
+        
+
