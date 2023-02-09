@@ -246,7 +246,6 @@ def loss_step(
         target[0:batch_size] = target[0:batch_size] * mask
 
     loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
-    print(f"loss: {loss}")
     return loss
 
 
