@@ -1,6 +1,6 @@
 # Bootstrapped from:
 # https://github.com/huggingface/diffusers/blob/main/examples/dreambooth/train_dreambooth.py
-
+import random
 import argparse
 import hashlib
 import inspect
@@ -116,11 +116,16 @@ def get_models(
         subfolder="unet",
         revision=revision,
     )
+    #move to device
+    if device!='cpu':
+        text_encoder.to(device)
+        vae.to(device)
+        unet.to(device)
 
     return (
-        text_encoder.to(device),
-        vae.to(device),
-        unet.to(device),
+        text_encoder,
+        vae,
+        unet,
         tokenizer,
         placeholder_token_ids,
     )
@@ -384,25 +389,30 @@ def train_inversion(
 
                         # open all images in test_image_path
                         images = []
+                        random_number = random.randint(1, 19)
+                        index =0
                         for file in os.listdir(test_image_path):
-                            if file.endswith(".png") or file.endswith(".jpg"):
-                                images.append(
-                                    Image.open(os.path.join(test_image_path, file))
-                                )
+                            if file.endswith(".png") or file.endswith(".jpg") or file.endswith("jpeg"):
+                                if random_number ==index or random_number==index-1:
+                                    images.append(
+                                        Image.open(os.path.join(test_image_path, file))
+                                    )
+                                index+=1
 
                         wandb.log({"loss": loss_sum / save_steps})
                         loss_sum = 0.0
-                        wandb.log(
-                            evaluate_pipe(
-                                pipe,
-                                target_images=images,
-                                class_token=class_token,
-                                learnt_token="".join(placeholder_tokens),
-                                n_test=wandb_log_prompt_cnt,
-                                n_step=50,
-                                clip_model_sets=preped_clip,
+                        if len(images)>0:
+                            wandb.log(
+                                evaluate_pipe(
+                                    pipe,
+                                    target_images=images,
+                                    class_token=class_token,
+                                    learnt_token="".join(placeholder_tokens),
+                                    n_test=wandb_log_prompt_cnt,
+                                    n_step=50,
+                                    clip_model_sets=preped_clip,
+                                )
                             )
-                        )
 
             if global_step >= num_steps:
                 return
@@ -421,7 +431,8 @@ def perform_tuning(
     placeholder_tokens,
     save_path,
     lr_scheduler_lora,
-    batch_size
+    batch_size,
+    log_wandb: bool = False,
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -449,6 +460,9 @@ def perform_tuning(
                 mixed_precision=True,
                 batch_size=batch_size
             )
+            if log_wandb:
+                wandb.log({"loss": loss})
+                wandb.log({"lr":lr_scheduler_lora.get_last_lr()[0]})
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 itertools.chain(unet.parameters(), text_encoder.parameters()), 1.0
@@ -464,6 +478,8 @@ def perform_tuning(
             global_step += 1
 
             if global_step % save_steps == 0:
+
+
                 save_all(
                     unet,
                     text_encoder,
@@ -474,6 +490,7 @@ def perform_tuning(
                     ),
                     safe_form=False
                 )
+
                 moved = (
                     torch.tensor(list(itertools.chain(*inspect_lora(unet).values())))
                     .mean()
@@ -1126,6 +1143,7 @@ def parse_args(input_args=None):
         "--use_xformers", action="store_true", help="Whether or not to use xformers"
     )
     parser.add_argument("--instance_prompt", type=str,default=None)
+    parser.add_argument("--device", type=str,default="cpu")
     parser.add_argument("--modeltoken", type=str,default=None)
     parser.add_argument("--use_face_segmentation_condition", action="store_true",required=False)
     if input_args is not None:
@@ -1189,10 +1207,10 @@ def main():
         weight_decay_ti=args.weight_decay_ti,
         weight_decay_lora=args.weight_decay_lora,
         use_8bit_adam=args.use_8bit_adam,
-        device="cuda:0",
+        device=args.device,
         log_wandb = False,
         wandb_log_prompt_cnt = 10,
         wandb_project_name = "new_pti_project",
-        wandb_entity = "new_pti_entity")
+        wandb_entity = "arifsaeed78")
 
 main()
