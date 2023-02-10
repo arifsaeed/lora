@@ -977,63 +977,37 @@ def save_all(
     save_lora=True,
     save_ti=True,
     target_replace_module_text=TEXT_ENCODER_DEFAULT_TARGET_REPLACE,
-    target_replace_module_unet=DEFAULT_TARGET_REPLACE,
-    safe_form=True,
+    target_replace_module_unet=DEFAULT_TARGET_REPLACE
 ):
-    if not safe_form:
-        # save ti
-        if save_ti:
-            ti_path = _ti_lora_path(save_path)
-            learned_embeds_dict = {}
-            for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
-                learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
-                print(
-                    f"Current Learned Embeddings for {tok}:, id {tok_id} ",
-                    learned_embeds[:4],
-                )
-                learned_embeds_dict[tok] = learned_embeds.detach().cpu()
 
-            torch.save(learned_embeds_dict, ti_path)
-            print("Ti saved to ", ti_path)
-
-        # save text encoder
-        if save_lora:
-
-            save_lora_weight(
-                unet, save_path, target_replace_module=target_replace_module_unet
+    # save ti
+    if save_ti:
+        ti_path = _ti_lora_path(save_path)
+        learned_embeds_dict = {}
+        for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
+            learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
+            print(
+                f"Current Learned Embeddings for {tok}:, id {tok_id} ",
+                learned_embeds[:4],
             )
-            print("Unet saved to ", save_path)
+            learned_embeds_dict[tok] = learned_embeds.detach().cpu()
 
-            save_lora_weight(
-                text_encoder,
-                _text_lora_path(save_path),
-                target_replace_module=target_replace_module_text,
-            )
-            print("Text Encoder saved to ", _text_lora_path(save_path))
+        torch.save(learned_embeds_dict, ti_path)
+        print("Ti saved to ", ti_path)
 
-    else:
-        assert save_path.endswith(
-            ".safetensors"
-        ), f"Save path : {save_path} should end with .safetensors"
+    # save text encoder
+    if save_lora:
 
-        loras = {}
-        embeds = None
+        save_lora_weight(
+            unet, save_path, target_replace_module=target_replace_module_unet
+        )
+        print("Unet saved to ", save_path)
 
-        if save_lora:
-
-            loras["unet"] = (unet, target_replace_module_unet)
-            loras["text_encoder"] = (text_encoder, target_replace_module_text)
-
-        if save_ti:
-            embeds = {}
-            for tok, tok_id in zip(placeholder_tokens, placeholder_token_ids):
-                learned_embeds = text_encoder.get_input_embeddings().weight[tok_id]
-                print(
-                    f"Current Learned Embeddings for {tok}:, id {tok_id} ",
-                    learned_embeds[:4],
-                )
-                embeds[tok] = learned_embeds.detach().cpu()
-
-        save_safeloras_with_embeds(loras, embeds, save_path)
+        save_lora_weight(
+            text_encoder,
+            _text_lora_path(save_path),
+            target_replace_module=target_replace_module_text,
+        )
+        print("Text Encoder saved to ", _text_lora_path(save_path))
         
 

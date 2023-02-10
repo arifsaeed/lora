@@ -1,5 +1,4 @@
 from typing import List, Union
-
 import torch
 from PIL import Image
 from transformers import (
@@ -16,7 +15,7 @@ import glob
 import math
 
 EXAMPLE_PROMPTS = [
-    "<obj> swimming in a pool",
+    "An image of <obj>",
     "<obj> at a beach with a view of seashore",
     "<obj> in times square",
     "<obj> wearing sunglasses",
@@ -47,7 +46,7 @@ EXAMPLE_PROMPTS = [
     "<obj> with a vase of rose flowers on it",
     "A digital illustration of <obj>",
     "Georgia O'Keeffe style <obj> painting",
-    "A watercolor painting of <obj> on a beach",
+    "A watercolor painting of <obj>",
 ]
 
 
@@ -118,7 +117,7 @@ def evaluate_pipe(
     seed=0,
     clip_model_sets=None,
     eval_clip_id: str = "openai/clip-vit-large-patch14",
-    n_test: int = 10,
+    n_test: int = 1,
     n_step: int = 50,
 ):
 
@@ -140,27 +139,27 @@ def evaluate_pipe(
                 prompt, num_inference_steps=n_step, guidance_scale=guidance_scale
             ).images[0]
         images.append(img)
-
+    return images
         # image
-        inputs = processor(images=img, return_tensors="pt")
-        img_embed = vis_model(**inputs).image_embeds
-        img_embeds.append(img_embed)
+        #inputs = processor(images=img, return_tensors="pt")
+        #img_embed = vis_model(**inputs).image_embeds
+        #img_embeds.append(img_embed)
 
-        prompt = prompt.replace(learnt_token, class_token)
+        #prompt = prompt.replace(learnt_token, class_token)
         # prompts
-        inputs = tokenizer([prompt], padding=True, return_tensors="pt")
-        outputs = text_model(**inputs)
-        text_embed = outputs.text_embeds
-        text_embeds.append(text_embed)
+        #inputs = tokenizer([prompt], padding=True, return_tensors="pt")
+        #outputs = text_model(**inputs)
+        #text_embed = outputs.text_embeds
+        #text_embeds.append(text_embed)
 
     # target images
-    inputs = processor(images=target_images, return_tensors="pt")
-    target_img_embeds = vis_model(**inputs).image_embeds
+    #inputs = processor(images=target_images, return_tensors="pt")
+    #target_img_embeds = vis_model(**inputs).image_embeds
 
-    img_embeds = torch.cat(img_embeds, dim=0)
-    text_embeds = torch.cat(text_embeds, dim=0)
+    #img_embeds = torch.cat(img_embeds, dim=0)
+    #text_embeds = torch.cat(text_embeds, dim=0)
 
-    return text_img_alignment(img_embeds, text_embeds, target_img_embeds)
+    #return text_img_alignment(img_embeds, text_embeds, target_img_embeds)
 
 
 def visualize_progress(

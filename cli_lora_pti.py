@@ -264,6 +264,7 @@ def train_inversion(
     index_no_updates,
     optimizer,
     save_steps: int,
+    log_steps:int,
     placeholder_token_ids,
     placeholder_tokens,
     save_path: str,
@@ -272,11 +273,12 @@ def train_inversion(
     test_image_path: str,
     accum_iter: int = 1,
     log_wandb: bool = False,
-    wandb_log_prompt_cnt: int = 10,
+    wandb_log_prompt_cnt: int = 1,
     class_token: str = "person",
     mixed_precision: bool = False,
     clip_ti_decay: bool = True,
-    batch_size: int=1
+    batch_size: int=1,
+    image_test_steps=5
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -296,9 +298,7 @@ def train_inversion(
         unet.eval()
         text_encoder.train()
         for batch in dataloader:
-
             lr_scheduler.step()
-
             with torch.set_grad_enabled(True):
                 loss = (
                     loss_step(
@@ -364,17 +364,8 @@ def train_inversion(
                 }
                 progress_bar.set_postfix(**logs)
 
-            if global_step % save_steps == 0:
-                save_all(
-                    unet=unet,
-                    text_encoder=text_encoder,
-                    placeholder_token_ids=placeholder_token_ids,
-                    placeholder_tokens=placeholder_tokens,
-                    save_path=os.path.join(
-                        save_path, f"step_inv_{global_step}.safetensors"
-                    ),
-                    save_lora=False,
-                )
+
+            if global_step % log_steps ==0:
                 if log_wandb:
                     with torch.no_grad():
                         pipe = StableDiffusionPipeline(
@@ -398,22 +389,37 @@ def train_inversion(
                                         Image.open(os.path.join(test_image_path, file))
                                     )
                                 index+=1
-
-                        wandb.log({"loss": loss_sum / save_steps})
+                        wandb.log({"inv_step": global_step})
+                        wandb.log({"inv_loss": loss_sum / log_steps})
+                        embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+                        wandb.log({"inv_embedding_min":torch.min(embedding)})
+                        wandb.log({"inv_embedding_max":torch.max(embedding)})
+                        wandb.log({"inv_embedding_mean":torch.mean(embedding)})
                         loss_sum = 0.0
-                        if len(images)>0:
-                            wandb.log(
-                                evaluate_pipe(
-                                    pipe,
-                                    target_images=images,
-                                    class_token=class_token,
-                                    learnt_token="".join(placeholder_tokens),
-                                    n_test=wandb_log_prompt_cnt,
-                                    n_step=50,
-                                    clip_model_sets=preped_clip,
-                                )
+                        if len(images)>0 and global_step % image_test_steps ==0:
+                            images=evaluate_pipe(
+                                pipe,
+                                target_images=images,
+                                learnt_token="".join(placeholder_tokens),
+                                n_test=1,
+                                n_step=50,
+                                clip_model_sets=preped_clip,
                             )
-
+                            for idx,image in enumerate(images):
+                                wandb_image=wandb.Image(image)
+                                wandb.log({f"inv_test_image_{idx}": wandb_image})
+                            
+            if global_step % save_steps == 0:
+                save_all(
+                    unet=unet,
+                    text_encoder=text_encoder,
+                    placeholder_token_ids=placeholder_token_ids,
+                    placeholder_tokens=placeholder_tokens,
+                    save_path=os.path.join(
+                        save_path, f"step_inv_{global_step}.pt"
+                    ),
+                    save_lora=False,
+                )
             if global_step >= num_steps:
                 return
 
@@ -424,6 +430,7 @@ def perform_tuning(
     text_encoder,
     dataloader,
     num_steps,
+    tokenizer,
     scheduler,
     optimizer,
     save_steps: int,
@@ -432,7 +439,9 @@ def perform_tuning(
     save_path,
     lr_scheduler_lora,
     batch_size,
+    test_image_path,
     log_wandb: bool = False,
+    image_test_steps=5
 ):
 
     progress_bar = tqdm(range(num_steps))
@@ -443,6 +452,8 @@ def perform_tuning(
 
     unet.train()
     text_encoder.train()
+    if log_wandb:
+        preped_clip = prepare_clip_model_sets()
 
     for epoch in range(math.ceil(num_steps / len(dataloader))):
         for batch in dataloader:
@@ -461,8 +472,47 @@ def perform_tuning(
                 batch_size=batch_size
             )
             if log_wandb:
-                wandb.log({"loss": loss})
-                wandb.log({"lr":lr_scheduler_lora.get_last_lr()[0]})
+                with torch.no_grad():
+                        pipe = StableDiffusionPipeline(
+                            vae=vae,
+                            text_encoder=text_encoder,
+                            tokenizer=tokenizer,
+                            unet=unet,
+                            scheduler=scheduler,
+                            safety_checker=None,
+                            feature_extractor=None,
+                        )
+                wandb.log({"lora_loss": loss})
+                wandb.log({"lora_lr":lr_scheduler_lora.get_last_lr()[0]})
+                embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+                wandb.log({"lora_embedding_min":torch.min(embedding)})
+                wandb.log({"lora_embedding_max":torch.max(embedding)})
+                wandb.log({"lora_embedding_mean":torch.mean(embedding)})    
+
+                images = []
+                random_number = random.randint(1, 19)
+                index =0
+                for file in os.listdir(test_image_path):
+                    if file.endswith(".png") or file.endswith(".jpg") or file.endswith("jpeg"):
+                        if random_number ==index or random_number==index-1:
+                            images.append(
+                                Image.open(os.path.join(test_image_path, file))
+                            )
+                        index+=1
+                if len(images)>0 and global_step % image_test_steps ==0:
+                    images=evaluate_pipe(
+                        pipe,
+                        target_images=images,
+                        learnt_token="".join(placeholder_tokens),
+                        n_test=1,
+                        n_step=50,
+                        clip_model_sets=preped_clip,
+                    )
+                    for idx,image in enumerate(images):
+                        wandb_image=wandb.Image(image)
+                        wandb.log({f"lora_test_image_{idx}": wandb_image})
+
+
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 itertools.chain(unet.parameters(), text_encoder.parameters()), 1.0
@@ -487,8 +537,7 @@ def perform_tuning(
                     placeholder_tokens=placeholder_tokens,
                     save_path=os.path.join(
                         save_path, f"step_{global_step}_lora.pt"
-                    ),
-                    safe_form=False
+                    )
                 )
 
                 moved = (
@@ -539,6 +588,7 @@ def train(
     max_train_steps_tuning: int = 1000,
     max_train_steps_ti: int = 1000,
     save_steps: int = 100,
+    log_steps:int =1,
     gradient_accumulation_steps: int = 4,
     gradient_checkpointing: bool = False,
     mixed_precision="fp16",
@@ -568,7 +618,7 @@ def train(
     wandb_entity: str = "new_pti_entity",
 ):
     torch.manual_seed(seed)
-
+    image_test_steps=50
     if log_wandb:
         wandb.init(
             project=wandb_project_name,
@@ -699,6 +749,7 @@ def train(
             optimizer=ti_optimizer,
             lr_scheduler=lr_scheduler,
             save_steps=save_steps,
+            log_steps=log_steps,
             placeholder_tokens=placeholder_tokens,
             placeholder_token_ids=placeholder_token_ids,
             save_path=output_dir,
@@ -709,7 +760,8 @@ def train(
             mixed_precision=False,
             tokenizer=tokenizer,
             clip_ti_decay=clip_ti_decay,
-            batch_size=train_batch_size
+            batch_size=train_batch_size,
+            image_test_steps=image_test_steps
         )
 
         del ti_optimizer
@@ -781,6 +833,7 @@ def train(
         text_encoder,
         train_dataloader,
         max_train_steps_tuning,
+        tokenizer=tokenizer,
         scheduler=noise_scheduler,
         optimizer=lora_optimizers,
         save_steps=save_steps,
@@ -788,7 +841,11 @@ def train(
         placeholder_token_ids=placeholder_token_ids,
         save_path=output_dir,
         lr_scheduler_lora=lr_scheduler_lora,
-        batch_size=train_batch_size
+        batch_size=train_batch_size,
+        test_image_path=instance_data_dir,
+        log_wandb=log_wandb,
+        image_test_steps=image_test_steps
+
     )
 
 
@@ -1142,6 +1199,10 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--use_xformers", action="store_true", help="Whether or not to use xformers"
     )
+    parser.add_argument(
+        "--log_wandb", action="store_true", help="Whether or not to log with wandb"
+    )
+
     parser.add_argument("--instance_prompt", type=str,default=None)
     parser.add_argument("--device", type=str,default="cpu")
     parser.add_argument("--modeltoken", type=str,default=None)
@@ -1208,7 +1269,7 @@ def main():
         weight_decay_lora=args.weight_decay_lora,
         use_8bit_adam=args.use_8bit_adam,
         device=args.device,
-        log_wandb = False,
+        log_wandb = args.log_wandb,
         wandb_log_prompt_cnt = 10,
         wandb_project_name = "new_pti_project",
         wandb_entity = "arifsaeed78")
