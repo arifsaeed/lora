@@ -135,6 +135,7 @@ def evaluate_pipe(
         prompt = prompt.replace("<obj>", learnt_token)
         torch.manual_seed(seed)
         with torch.autocast("cuda"):
+            prompt="an image of a woman"
             img = pipe(
                 prompt, num_inference_steps=n_step, guidance_scale=guidance_scale
             ).images[0]
@@ -211,3 +212,61 @@ def visualize_progress(
         imgs.append(image)
 
     return imgs
+
+def add_embedding(tokenizer,text_encoder,embeddings,placeholder_tokens,initializer_tokens):
+    
+    placeholder_token_ids = []
+    for token, init_tok in zip(placeholder_tokens, initializer_tokens):
+        num_added_tokens = tokenizer.add_tokens(token)
+    if num_added_tokens == 0:
+        raise ValueError(
+            f"The tokenizer already contains the token {token}. Please pass a different"
+            " `placeholder_token` that is not already in the tokenizer."
+        )
+
+    placeholder_token_id = tokenizer.convert_tokens_to_ids(token)
+
+    placeholder_token_ids.append(placeholder_token_id)
+
+    # Load models and create wrapper for stable diffusion
+
+    text_encoder.resize_token_embeddings(len(tokenizer))
+    token_embeds = text_encoder.get_input_embeddings().weight.data
+    token_embeds[placeholder_token_id] = embeddings
+
+def visualize_inversion_progress(
+    prompts,
+    placeholder_tokens,
+    initializer_tokens,
+    embedding,
+    model_id: str = "runwayml/stable-diffusion-v1-5",
+    device="cuda:0",
+    num_inference_steps=50,
+    guidance_scale=5.0,
+    offset: int = 0,
+    limit: int = 10,
+    seed: int = 0,
+):
+
+    imgs = []
+
+    pipe = StableDiffusionPipeline.from_pretrained(
+        model_id, torch_dtype=torch.float16
+    )#.to("cuda:0")
+
+    add_embedding(pipe.tokenizer,pipe.text_encoder,embedding,placeholder_tokens,initializer_tokens)
+
+    torch.manual_seed(seed)
+    for prompt in prompts:
+        image = pipe(
+            prompt,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+        ).images[0]
+        imgs.append(image)
+
+    return imgs
+
+
+def run_inference_on_model():
+    print("not implemented")

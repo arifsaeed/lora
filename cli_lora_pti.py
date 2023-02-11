@@ -41,6 +41,7 @@ from lora_diffusion import (
     save_all,
     prepare_clip_model_sets,
     evaluate_pipe,
+    visualize_inversion_progress
 )
 
 
@@ -255,6 +256,7 @@ def loss_step(
 
 
 def train_inversion(
+    model_name,
     unet,
     vae,
     text_encoder,
@@ -267,6 +269,7 @@ def train_inversion(
     log_steps:int,
     placeholder_token_ids,
     placeholder_tokens,
+    initializer_tokens,
     save_path: str,
     tokenizer,
     lr_scheduler,
@@ -287,7 +290,8 @@ def train_inversion(
 
     # Original Emb for TI
     orig_embeds_params = text_encoder.get_input_embeddings().weight.data.clone()
-
+    orig_class_embeds= text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+    cos = torch.nn.CosineSimilarity(dim=0, eps=1e-6)
     if log_wandb:
         preped_clip = prepare_clip_model_sets()
 
@@ -367,47 +371,44 @@ def train_inversion(
 
             if global_step % log_steps ==0:
                 if log_wandb:
-                    with torch.no_grad():
-                        pipe = StableDiffusionPipeline(
-                            vae=vae,
-                            text_encoder=text_encoder,
-                            tokenizer=tokenizer,
-                            unet=unet,
-                            scheduler=scheduler,
-                            safety_checker=None,
-                            feature_extractor=None,
-                        )
-
+                    #with torch.no_grad():
+                    #    pipe = StableDiffusionPipeline(
+                    #        vae=vae,
+                    #        text_encoder=text_encoder,
+                    #        tokenizer=tokenizer,
+                    #        unet=unet,
+                    #        scheduler=scheduler,
+                    #        safety_checker=None,
+                    #        feature_extractor=None,
+                    #    )
+                    #    prompt="an image of a woman"
+                    #    img = pipe(
+                    #        prompt, num_inference_steps=50, guidance_scale=5.0
+                    #    ).images[0]
                         # open all images in test_image_path
-                        images = []
-                        random_number = random.randint(1, 19)
-                        index =0
-                        for file in os.listdir(test_image_path):
-                            if file.endswith(".png") or file.endswith(".jpg") or file.endswith("jpeg"):
-                                if random_number ==index or random_number==index-1:
-                                    images.append(
-                                        Image.open(os.path.join(test_image_path, file))
-                                    )
-                                index+=1
+                    #    images = []
+                    #    random_number = random.randint(1, 19)
+                    #    index =0
+                    #    for file in os.listdir(test_image_path):
+                    #        if file.endswith(".png") or file.endswith(".jpg") or file.endswith("jpeg"):
+                    #            if random_number ==index or random_number==index-1:
+                    #                images.append(
+                    #                    Image.open(os.path.join(test_image_path, file))
+                    #                )
+                    #            index+=1
                         wandb.log({"inv_step": global_step})
                         wandb.log({"inv_loss": loss_sum / log_steps})
-                        embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
-                        wandb.log({"inv_embedding_min":torch.min(embedding)})
-                        wandb.log({"inv_embedding_max":torch.max(embedding)})
+                        embedding= text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+                        similarity=cos(embedding,orig_class_embeds)
+                        wandb.log({"inv_cos_similarity":similarity})
                         wandb.log({"inv_embedding_mean":torch.mean(embedding)})
                         loss_sum = 0.0
-                        if len(images)>0 and global_step % image_test_steps ==0:
-                            images=evaluate_pipe(
-                                pipe,
-                                target_images=images,
-                                learnt_token="".join(placeholder_tokens),
-                                n_test=1,
-                                n_step=50,
-                                clip_model_sets=preped_clip,
-                            )
-                            for idx,image in enumerate(images):
-                                wandb_image=wandb.Image(image)
-                                wandb.log({f"inv_test_image_{idx}": wandb_image})
+                     #   if len(images)>0 and global_step % image_test_steps ==0:
+                        test_prompts=["an image of renwa", "an image of a woman"]
+                        images=visualize_inversion_progress(test_prompts,placeholder_tokens,initializer_tokens,embedding,model_name)
+                        for idx,image in enumerate(images):
+                            wandb_image=wandb.Image(image)
+                            wandb.log({f"inv_test_image_{idx}": wandb_image})
                             
             if global_step % save_steps == 0:
                 save_all(
@@ -425,6 +426,7 @@ def train_inversion(
 
 
 def perform_tuning(
+    model_name,
     unet,
     vae,
     text_encoder,
@@ -436,6 +438,7 @@ def perform_tuning(
     save_steps: int,
     placeholder_token_ids,
     placeholder_tokens,
+    initializer_tokens,
     save_path,
     lr_scheduler_lora,
     batch_size,
@@ -455,12 +458,16 @@ def perform_tuning(
     if log_wandb:
         preped_clip = prepare_clip_model_sets()
 
+    embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+    wandb.log({"lora_embedding_min_460":torch.min(embedding)})
+
     for epoch in range(math.ceil(num_steps / len(dataloader))):
         for batch in dataloader:
             lr_scheduler_lora.step()
 
             optimizer.zero_grad()
-
+            embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+            wandb.log({"lora_embedding_min_468":torch.min(embedding)})
             loss = loss_step(
                 batch,
                 unet,
@@ -472,16 +479,6 @@ def perform_tuning(
                 batch_size=batch_size
             )
             if log_wandb:
-                with torch.no_grad():
-                        pipe = StableDiffusionPipeline(
-                            vae=vae,
-                            text_encoder=text_encoder,
-                            tokenizer=tokenizer,
-                            unet=unet,
-                            scheduler=scheduler,
-                            safety_checker=None,
-                            feature_extractor=None,
-                        )
                 wandb.log({"lora_loss": loss})
                 wandb.log({"lora_lr":lr_scheduler_lora.get_last_lr()[0]})
                 embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
@@ -489,28 +486,11 @@ def perform_tuning(
                 wandb.log({"lora_embedding_max":torch.max(embedding)})
                 wandb.log({"lora_embedding_mean":torch.mean(embedding)})    
 
-                images = []
-                random_number = random.randint(1, 19)
-                index =0
-                for file in os.listdir(test_image_path):
-                    if file.endswith(".png") or file.endswith(".jpg") or file.endswith("jpeg"):
-                        if random_number ==index or random_number==index-1:
-                            images.append(
-                                Image.open(os.path.join(test_image_path, file))
-                            )
-                        index+=1
-                if len(images)>0 and global_step % image_test_steps ==0:
-                    images=evaluate_pipe(
-                        pipe,
-                        target_images=images,
-                        learnt_token="".join(placeholder_tokens),
-                        n_test=1,
-                        n_step=50,
-                        clip_model_sets=preped_clip,
-                    )
-                    for idx,image in enumerate(images):
-                        wandb_image=wandb.Image(image)
-                        wandb.log({f"lora_test_image_{idx}": wandb_image})
+                test_prompts=["an image of renwa", "an image of a woman"]
+                images=visualize_inversion_progress(test_prompts,placeholder_tokens,initializer_tokens,embedding,model_name)
+                for idx,image in enumerate(images):
+                    wandb_image=wandb.Image(image)
+                    wandb.log({f"lora_test_image_{idx}": wandb_image})
 
 
             loss.backward()
@@ -610,15 +590,15 @@ def train(
     weight_decay_ti: float = 0.00,
     weight_decay_lora: float = 0.001,
     use_8bit_adam: bool = False,
-    device="cuda:0",
+    device='cpu',#"cuda:0",
     extra_args: Optional[dict] = None,
     log_wandb: bool = False,
     wandb_log_prompt_cnt: int = 10,
     wandb_project_name: str = "new_pti_project",
     wandb_entity: str = "new_pti_entity",
+    image_test_steps=1
 ):
     torch.manual_seed(seed)
-    image_test_steps=50
     if log_wandb:
         wandb.init(
             project=wandb_project_name,
@@ -667,6 +647,8 @@ def train(
         device=device,
     )
 
+    #input_ids= tokenizer(class_prompt,padding="do_not_pad",truncation=True,max_length=tokenizer.model_max_length,).input_ids
+    #encoded=text_encoder(input_ids)
     noise_scheduler = DDPMScheduler.from_config(
         pretrained_model_name_or_path, subfolder="scheduler"
     )
@@ -738,6 +720,7 @@ def train(
         )
 
         train_inversion(
+            pretrained_model_name_or_path,
             unet,
             vae,
             text_encoder,
@@ -751,6 +734,7 @@ def train(
             save_steps=save_steps,
             log_steps=log_steps,
             placeholder_tokens=placeholder_tokens,
+            initializer_tokens=initializer_tokens,
             placeholder_token_ids=placeholder_token_ids,
             save_path=output_dir,
             test_image_path=instance_data_dir,
@@ -766,10 +750,14 @@ def train(
 
         del ti_optimizer
 
+        embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+        wandb.log({"lora_embedding_min_775":torch.min(embedding)})
     # Next perform Tuning with LoRA:
     unet_lora_params, _ = inject_trainable_lora(
         unet, r=lora_rank, target_replace_module=lora_unet_target_modules
     )
+    embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+    wandb.log({"lora_embedding_min_781":torch.min(embedding)})
 
     print("Before training:")
     inspect_lora(unet)
@@ -779,7 +767,8 @@ def train(
     ]
 
     text_encoder.requires_grad_(False)
-
+    embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+    wandb.log({"lora_embedding_min_791":torch.min(embedding)})
     if continue_inversion:
         params_to_optimize += [
             {
@@ -797,7 +786,8 @@ def train(
         )
         for param in params_to_freeze:
             param.requires_grad = False
-
+    embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+    wandb.log({"lora_embedding_min_811":torch.min(embedding)})
     if train_text_encoder:
         text_encoder_lora_params, _ = inject_trainable_lora(
             text_encoder,
@@ -827,7 +817,10 @@ def train(
         num_training_steps=max_train_steps_tuning,
     )
 
+    embedding=learned_embeds = text_encoder.get_input_embeddings().weight[placeholder_token_ids[0]]
+    wandb.log({"lora_embedding_min_842":torch.min(embedding)})
     perform_tuning(
+        pretrained_model_name_or_path,
         unet,
         vae,
         text_encoder,
@@ -838,6 +831,7 @@ def train(
         optimizer=lora_optimizers,
         save_steps=save_steps,
         placeholder_tokens=placeholder_tokens,
+        initializer_tokens=initializer_tokens,
         placeholder_token_ids=placeholder_token_ids,
         save_path=output_dir,
         lr_scheduler_lora=lr_scheduler_lora,
@@ -845,7 +839,6 @@ def train(
         test_image_path=instance_data_dir,
         log_wandb=log_wandb,
         image_test_steps=image_test_steps
-
     )
 
 
@@ -1234,7 +1227,7 @@ def main():
         use_template=args.use_template,
         placeholder_tokens=args.placeholder_tokens,
         placeholder_token_at_data=args.placeholder_token_at_data,
-        initializer_tokens=None,
+        initializer_tokens='Woman',
         class_prompt=args.class_prompt,
         instance_prompt=args.instance_prompt,
         with_prior_preservation=args.with_prior_preservation,
@@ -1268,7 +1261,7 @@ def main():
         weight_decay_ti=args.weight_decay_ti,
         weight_decay_lora=args.weight_decay_lora,
         use_8bit_adam=args.use_8bit_adam,
-        log_wandb = args.log_wandb,
+        log_wandb = args.log_wandb,#args.log_wandb,
         wandb_log_prompt_cnt = 10,
         wandb_project_name = "new_pti_project",
         wandb_entity = "arifsaeed78")
