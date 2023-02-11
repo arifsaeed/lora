@@ -1268,7 +1268,6 @@ def main():
         weight_decay_ti=args.weight_decay_ti,
         weight_decay_lora=args.weight_decay_lora,
         use_8bit_adam=args.use_8bit_adam,
-        device=args.device,
         log_wandb = args.log_wandb,
         wandb_log_prompt_cnt = 10,
         wandb_project_name = "new_pti_project",
