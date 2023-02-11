@@ -1197,7 +1197,7 @@ def parse_args(input_args=None):
     )
 
     parser.add_argument("--instance_prompt", type=str,default=None)
-    parser.add_argument("--device", type=str,default="cpu")
+    parser.add_argument("--device", type=str,default="cuda:0")
     parser.add_argument("--modeltoken", type=str,default=None)
     parser.add_argument("--use_face_segmentation_condition", action="store_true",required=False)
     if input_args is not None:
