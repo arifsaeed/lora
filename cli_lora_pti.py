@@ -405,10 +405,10 @@ def train_inversion(
                         loss_sum = 0.0
                      #   if len(images)>0 and global_step % image_test_steps ==0:
                         test_prompts=["an image of renwa", "an image of a woman"]
-                        images=visualize_inversion_progress(test_prompts,placeholder_tokens,initializer_tokens,embedding,model_name)
-                        for idx,image in enumerate(images):
-                            wandb_image=wandb.Image(image)
-                            wandb.log({f"inv_test_image_{idx}": wandb_image})
+                        #images=visualize_inversion_progress(test_prompts,placeholder_tokens,initializer_tokens,embedding,model_name)
+                        #for idx,image in enumerate(images):
+                        #    wandb_image=wandb.Image(image)
+                        #    wandb.log({f"inv_test_image_{idx}": wandb_image})
                             
             if global_step % save_steps == 0:
                 save_all(
@@ -487,10 +487,10 @@ def perform_tuning(
                 wandb.log({"lora_embedding_mean":torch.mean(embedding)})    
 
                 test_prompts=["an image of renwa", "an image of a woman"]
-                images=visualize_inversion_progress(test_prompts,placeholder_tokens,initializer_tokens,embedding,model_name)
-                for idx,image in enumerate(images):
-                    wandb_image=wandb.Image(image)
-                    wandb.log({f"lora_test_image_{idx}": wandb_image})
+                #images=visualize_inversion_progress(test_prompts,placeholder_tokens,initializer_tokens,embedding,model_name)
+                #for idx,image in enumerate(images):
+                #    wandb_image=wandb.Image(image)
+                #    wandb.log({f"lora_test_image_{idx}": wandb_image})
 
 
             loss.backward()
